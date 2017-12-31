@@ -1,5 +1,11 @@
 import moment from 'moment';
 
+const THRESHOLD_PERCENT = 2; // percent above which to send alert
+const ALERTS_ON = false; // turn on alerts?
+let lastAlertTime = Date.now();
+const ALERT_INTERVAL = 10000; // milliseconds between alerts
+const PRECISION = 4; // significant figures for prices
+
 document.addEventListener('DOMContentLoaded', () => {
   const markets = {
     gdax: {
@@ -13,13 +19,13 @@ document.addEventListener('DOMContentLoaded', () => {
     },
     binance: {
       on: true,
-      pairs: ['ethbtc', 'ltcbtc', 'ltceth', 'xrpeth', 'xrpbtc'],
+      pairs: ['ethbtc', 'ltcbtc', 'ltceth', 'xrpeth', 'xrpbtc', 'xvgbtc', 'xvgeth'],
       taker: 0.0005,
       maker: 0.0005,
     },
     hitbtc: {
       on: true,
-      pairs: ['ETHBTC', 'LTCBTC', 'LTCETH', 'XRPBTC'],
+      pairs: ['ETHBTC', 'LTCBTC', 'LTCETH', 'XRPBTC', 'XVGBTC', 'XVGETH'],
       conjPairs: {
         'XRP/ETH': ['XRPBTC', 'ETHBTC', 'div'],
       },
@@ -55,6 +61,12 @@ document.addEventListener('DOMContentLoaded', () => {
     
     'XRP/ETH': 'XRP/ETH',
     'xrpeth': 'XRP/ETH',
+
+    'xvgbtc': 'XVG/BTC',
+    'XVGBTC': 'XVG/BTC',
+
+    'xvgeth': 'XVG/ETH',
+    'XVGETH': 'XVG/ETH',
   };
 
   function calculateMargins() {
@@ -64,19 +76,30 @@ document.addEventListener('DOMContentLoaded', () => {
       'LTC/ETH': {},
       'XRP/BTC': {},
       'XRP/ETH': {},
+      'XVG/BTC': {},
+      'XVG/ETH': {},
     };
 
     function comparePrices(currencyPair, price, market) {
-      let { minPrice, maxPrice, minPriceMarket, maxPriceMarket } = margins[currencyPair];
+      let { minPrice, maxPrice, minPriceMarket, maxPriceMarket } = margins[currencyPair],
+        makerMult = 1 - markets[market].maker,
+        takerMult = 1 + markets[market].taker;
 
-        if (!minPrice || price < minPrice) {
-          margins[currencyPair].minPrice = price;
+        if (!minPrice || price * takerMult < minPrice) {
+          margins[currencyPair].minPrice = price * takerMult;
           margins[currencyPair].minPriceMarket = market;
         }
-        if (!maxPrice || price > maxPrice) {
-          margins[currencyPair].maxPrice = price;
+        if (!maxPrice || price * makerMult > maxPrice) {
+          margins[currencyPair].maxPrice = price * makerMult;
           margins[currencyPair].maxPriceMarket = market;
         }
+    }
+
+    function sendAlert(pair, percent, buyMarket, sellMarket) {
+      if (ALERTS_ON && Date.now() - lastAlertTime > ALERT_INTERVAL) {
+        alert(`${percent} at ${timeFromDate(now())} - Buy ${pair} @ ${buyMarket} and sell @ ${sellMarket}`);
+        lastAlertTime = Date.now();
+      }
     }
 
     Object.keys(markets).forEach(market => {
@@ -99,12 +122,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let text = '';
     Object.keys(margins).forEach(pair => {
       const { minPrice, maxPrice, minPriceMarket, maxPriceMarket } = margins[pair],
-      makerMult = 1 - markets[maxPriceMarket].maker,
-      takerMult = 1 + markets[minPriceMarket].taker,
-      grossPercent = ((maxPrice / minPrice - 1) * 100).toFixed(2),
-      netPercent = ((maxPrice * makerMult / minPrice / takerMult - 1) * 100).toFixed(2);
+        percent = ((maxPrice / minPrice - 1) * 100).toFixed(2);
 
-      text += `${pair}: ${netPercent}%, min: ${minPrice} @ ${minPriceMarket}, max: ${maxPrice} @ ${maxPriceMarket}` + '\n';
+      if (ALERTS_ON && percent > THRESHOLD_PERCENT) 
+        sendAlert(pair, percent, minPriceMarket, maxPriceMarket);
+      text += `${pair}: ${percent}%, min: ${minPrice} @ ${minPriceMarket}, max: ${maxPrice} @ ${maxPriceMarket}` + '\n';
     });
 
     const el = document.getElementById('margins');
@@ -194,17 +216,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const hbws = new WebSocket('wss://api.hitbtc.com/api/2/ws');
    
     hbws.onopen = () => {
-      markets[market].pairs.forEach(pair => {
-        hbws.send(JSON.stringify({
-          "method": "subscribeTrades",
-          "params": { symbol: pair },
-          "id": 123,
-        }));
-        hbws.send(JSON.stringify({
-          "method": "subscribeTicker",
-          "params": { symbol: pair },
-          "id": 124,
-        }));
+      markets[market].pairs.forEach((pair, idx) => {
+        setTimeout(() => {
+          hbws.send(JSON.stringify({
+            "method": "subscribeTrades",
+            "params": { symbol: pair },
+            "id": 123,
+          }));
+          hbws.send(JSON.stringify({
+            "method": "subscribeTicker",
+            "params": { symbol: pair },
+            "id": 124,
+          }));
+        }, 200 * idx);
       });
     };
 
@@ -290,9 +314,9 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function log(market, pair, price, ask, bid, time) {
-    markets[market][pair] = price || markets[market][pair];
-    markets[market][pair + '_bid'] = bid || markets[market][pair + '_bid'];
-    markets[market][pair + '_ask'] = ask || markets[market][pair + '_ask'];
+    markets[market][pair] = price && price.toPrecision(PRECISION) || markets[market][pair];
+    markets[market][pair + '_bid'] = bid && bid.toPrecision(PRECISION) || markets[market][pair + '_bid'];
+    markets[market][pair + '_ask'] = ask && ask.toPrecision(PRECISION) || markets[market][pair + '_ask'];
     markets[market][pair + '_time'] = time || markets[market][pair + '_time'];
 
     if (markets[market].conjPairs) {
@@ -302,7 +326,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const conjPrice = params[2] === 'div' ?
           markets[market][params[0]] / markets[market][params[1]] :
           markets[market][params[0]] * markets[market][params[1]] ;
-        markets[market][currencyPair] = conjPrice;
+        markets[market][currencyPair] = conjPrice && conjPrice.toPrecision(PRECISION);
         markets[market][currencyPair + '_time'] = 
           time || markets[market][currencyPair + '_time'];
       });
@@ -313,9 +337,10 @@ document.addEventListener('DOMContentLoaded', () => {
     let text = '';
     function addToText(pair) {
       text += pairDisplayNames[pair] + 
-      ': ' + markets[market][pair] + ', bid: ' + markets[market][pair + '_bid'] 
-      + ', ask: ' + markets[market][pair + '_ask'] + ' at ' +
-      markets[market][pair + '_time'] + '\n';
+      ': ' + markets[market][pair] + ', bid: ' + 
+      markets[market][pair + '_bid'] +
+      ', ask: ' + markets[market][pair + '_ask'] + 
+      ' at ' + markets[market][pair + '_time'] + '\n';
     }
     markets[market].pairs.forEach(pair => addToText(pair));
     if (markets[market].conjPairs)
@@ -326,17 +351,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     calculateMargins();
   }
-
-  function timeFromDate(dateStr) {
-    // MMM Do YYYY
-    return moment(dateStr).format('HH:mm:ss');
-  }
-
-  function timeFromUnix(timestamp) {
-    return moment.unix(parseInt(timestamp)).format('HH:mm:ss');
-  }
-
-  function now() {
-    return moment().format('HH:mm:ss');
-  }
 });
+
+function timeFromDate(dateStr) {
+  // MMM Do YYYY
+  return moment(dateStr).format('HH:mm:ss');
+}
+
+function timeFromUnix(timestamp) {
+  return moment.unix(parseInt(timestamp)).format('HH:mm:ss');
+}
+
+function now() {
+  return moment().format('HH:mm:ss');
+}
