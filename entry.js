@@ -14,12 +14,15 @@ document.addEventListener('DOMContentLoaded', () => {
       conjPairs: {
         'LTC/ETH': ['LTC-BTC', 'ETH-BTC', 'div'],
       },
-      taker: 0.0025,
+      taker: 0.003,
       maker: 0,
     },
     binance: {
       on: true,
-      pairs: ['ethbtc', 'ltcbtc', 'ltceth', 'xrpeth', 'xrpbtc', 'xvgbtc', 'xvgeth'],
+      pairs: ['ethbtc', 'ltcbtc', 'ltceth', 'xlmeth', 'xlmbtc', 'xrpeth', 'xrpbtc', 'xvgbtc', 'xvgeth'],
+      conjPairs: {
+        'XLM/ETH2': ['xlmbtc', 'ethbtc', 'div'],
+      },
       taker: 0.0005,
       maker: 0.0005,
     },
@@ -56,6 +59,10 @@ document.addEventListener('DOMContentLoaded', () => {
     'ltceth': 'LTC/ETH',
     'LTCETH': 'LTC/ETH',
 
+    'xlmbtc':'XLM/BTC',
+    'xlmeth':'XLM/ETH',
+    'XLM/ETH2': 'XLM/ETH2',
+
     'XRPBTC': 'XRP/BTC',
     'xrpbtc': 'XRP/BTC',
     
@@ -68,71 +75,6 @@ document.addEventListener('DOMContentLoaded', () => {
     'xvgeth': 'XVG/ETH',
     'XVGETH': 'XVG/ETH',
   };
-
-  function calculateMargins() {
-    const margins = {
-      'ETH/BTC': {}, // minPrice, maxPrice, minPriceMarket, maxPriceMarket, percent
-      'LTC/BTC': {},
-      'LTC/ETH': {},
-      'XRP/BTC': {},
-      'XRP/ETH': {},
-      'XVG/BTC': {},
-      'XVG/ETH': {},
-    };
-
-    function comparePrices(currencyPair, price, market) {
-      let { minPrice, maxPrice, minPriceMarket, maxPriceMarket } = margins[currencyPair],
-        makerMult = 1 - markets[market].maker,
-        takerMult = 1 + markets[market].taker;
-
-        if (!minPrice || price * takerMult < minPrice) {
-          margins[currencyPair].minPrice = price * takerMult;
-          margins[currencyPair].minPriceMarket = market;
-        }
-        if (!maxPrice || price * makerMult > maxPrice) {
-          margins[currencyPair].maxPrice = price * makerMult;
-          margins[currencyPair].maxPriceMarket = market;
-        }
-    }
-
-    function sendAlert(pair, percent, buyMarket, sellMarket) {
-      if (ALERTS_ON && Date.now() - lastAlertTime > ALERT_INTERVAL) {
-        alert(`${percent} at ${timeFromDate(now())} - Buy ${pair} @ ${buyMarket} and sell @ ${sellMarket}`);
-        lastAlertTime = Date.now();
-      }
-    }
-
-    Object.keys(markets).forEach(market => {
-      const curMarket = markets[market];
-      curMarket.pairs.forEach(pair => {
-        const currencyPair = pairDisplayNames[pair];
-        const price = curMarket[pair];
-        comparePrices(currencyPair, price, market);
-      });
-
-      if (curMarket.conjPairs) {
-        const { conjPairs } = curMarket;
-        Object.keys(conjPairs).forEach(currencyPair => {
-          const price = curMarket[currencyPair];
-          comparePrices(currencyPair, price, market);
-        });
-      }
-    });
-
-    let text = '';
-    Object.keys(margins).forEach(pair => {
-      const { minPrice, maxPrice, minPriceMarket, maxPriceMarket } = margins[pair],
-        percent = ((maxPrice / minPrice - 1) * 100).toFixed(2);
-
-      if (ALERTS_ON && percent > THRESHOLD_PERCENT) 
-        sendAlert(pair, percent, minPriceMarket, maxPriceMarket);
-      text += `${pair}: ${percent}%, min: ${minPrice} @ ${minPriceMarket}, max: ${maxPrice} @ ${maxPriceMarket}` + '\n';
-    });
-
-    const el = document.getElementById('margins');
-    el.textContent = text;
-    el.style.whiteSpace = 'pre';
-  }
 
   if (markets.gdax.on) {
     const market = 'gdax';
@@ -350,6 +292,74 @@ document.addEventListener('DOMContentLoaded', () => {
     el.style.whiteSpace = 'pre';
 
     calculateMargins();
+  }
+
+  function calculateMargins() {
+    const margins = {
+      'ETH/BTC': {}, // minPrice, maxPrice, minPriceMarket, maxPriceMarket, percent
+      'LTC/BTC': {},
+      'LTC/ETH': {},
+      'XLM/BTC': {},
+      'XLM/ETH': {},
+      'XLM/ETH2': {},
+      'XRP/BTC': {},
+      'XRP/ETH': {},
+      'XVG/BTC': {},
+      'XVG/ETH': {},
+    };
+
+    function comparePrices(currencyPair, price, market) {
+      let { minPrice, maxPrice, minPriceMarket, maxPriceMarket } = margins[currencyPair],
+        buyMult = 1 + markets[market].taker,
+        sellMult = 1 - markets[market].taker;
+
+        if (!minPrice || price * buyMult < minPrice) {
+          margins[currencyPair].minPrice = (price * buyMult).toPrecision(PRECISION);
+          margins[currencyPair].minPriceMarket = market;
+        }
+        if (!maxPrice || price * sellMult > maxPrice) {
+          margins[currencyPair].maxPrice = (price * sellMult).toPrecision(PRECISION);
+          margins[currencyPair].maxPriceMarket = market;
+        }
+    }
+
+    function sendAlert(pair, percent, buyMarket, sellMarket) {
+      if (ALERTS_ON && Date.now() - lastAlertTime > ALERT_INTERVAL) {
+        alert(`${percent} at ${timeFromDate(now())} - Buy ${pair} @ ${buyMarket} and sell @ ${sellMarket}`);
+        lastAlertTime = Date.now();
+      }
+    }
+
+    Object.keys(markets).forEach(market => {
+      const curMarket = markets[market];
+      curMarket.pairs.forEach(pair => {
+        const currencyPair = pairDisplayNames[pair];
+        const price = curMarket[pair];
+        comparePrices(currencyPair, price, market);
+      });
+
+      if (curMarket.conjPairs) {
+        const { conjPairs } = curMarket;
+        Object.keys(conjPairs).forEach(currencyPair => {
+          const price = curMarket[currencyPair];
+          comparePrices(currencyPair, price, market);
+        });
+      }
+    });
+
+    let text = '';
+    Object.keys(margins).forEach(pair => {
+      const { minPrice, maxPrice, minPriceMarket, maxPriceMarket } = margins[pair],
+        percent = ((maxPrice / minPrice - 1) * 100).toFixed(2);
+
+      if (ALERTS_ON && percent > THRESHOLD_PERCENT) 
+        sendAlert(pair, percent, minPriceMarket, maxPriceMarket);
+      text += `${pair}: ${percent}%, min: ${minPrice} @ ${minPriceMarket}, max: ${maxPrice} @ ${maxPriceMarket}` + '\n';
+    });
+
+    const el = document.getElementById('margins');
+    el.textContent = text;
+    el.style.whiteSpace = 'pre';
   }
 });
 
